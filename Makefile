@@ -71,7 +71,9 @@ tag:
 	docker tag $(IMAGE) $(IMAGE):$(TAG)
 
 pull:
-	@grep -E '^\s*FROM' Dockerfile \
+	$(eval VERSION = $(shell if [ '$(TAG)' = "latest" ]; then echo '7-cli-alpine'; else echo '$(TAG)'; fi))
+	grep -E '^\s*FROM' Dockerfile \
+		| sed -e 's/$${VERSION}/$(VERSION)/g' \
 		| sed -e 's/^FROM//g' -e 's/[[:space:]]*as[[:space:]]*.*$$//g' \
 		| xargs -n1 docker pull;
 
