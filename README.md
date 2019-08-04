@@ -4,6 +4,7 @@
 [![Tag](https://img.shields.io/github/tag/cytopia/docker-phplint.svg)](https://github.com/cytopia/docker-phplint/releases)
 [![](https://images.microbadger.com/badges/version/cytopia/phplint:latest.svg?kill_cache=1)](https://microbadger.com/images/cytopia/phplint:latest "phplint")
 [![](https://images.microbadger.com/badges/image/cytopia/phplint:latest.svg?kill_cache=1)](https://microbadger.com/images/cytopia/phplint:latest "phplint")
+[![](https://img.shields.io/docker/pulls/cytopia/phplint.svg)](https://hub.docker.com/r/cytopia/phplint)
 [![](https://img.shields.io/badge/github-cytopia%2Fdocker--phplint-red.svg)](https://github.com/cytopia/docker-phplint "github.com/cytopia/docker-phplint")
 [![License](https://img.shields.io/badge/license-MIT-%233DA639.svg)](https://opensource.org/licenses/MIT)
 
@@ -61,7 +62,7 @@ The image is built nightly against multiple stable versions and pushed to Docker
 
 ## Docker mounts
 
-The working directory inside the Docker container is `/data/` and should be mounted locally to
+The working directory inside the Docker container is **`/data/`** and should be mounted locally to
 where your PHP code is located
 
 
