@@ -1,8 +1,8 @@
-ARG VERSION
-FROM php:${VERSION}
+FROM php:7.1-cli-alpine
 
 RUN set -eux \
-	&& apk add --no-cache bash
+	&& apk add --no-cache \
+		bash
 
 COPY ./data/docker-entrypoint.sh /docker-entrypoint.sh
 

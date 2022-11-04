@@ -1,0 +1,9 @@
+FROM php:7.4-cli
+
+COPY ./data/docker-entrypoint.sh /docker-entrypoint.sh
+
+ENV WORKDIR /data
+WORKDIR /data
+
+CMD ["*.php"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
