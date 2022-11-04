@@ -2,40 +2,140 @@ ifneq (,)
 .error This Makefile requires GNU Make.
 endif
 
-.PHONY: build rebuild lint test _test-run-ok _test-run-fail tag pull login push enter
+# Ensure additional Makefiles are present
+MAKEFILES = Makefile.docker Makefile.lint
+$(MAKEFILES): URL=https://raw.githubusercontent.com/devilbox/makefiles/master/$(@)
+$(MAKEFILES):
+	@if ! (curl --fail -sS -o $(@) $(URL) || wget -O $(@) $(URL)); then \
+		echo "Error, curl or wget required."; \
+		echo "Exiting."; \
+		false; \
+	fi
+include $(MAKEFILES)
 
-CURRENT_DIR = $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+# Set default Target
+.DEFAULT_GOAL := help
 
-DIR = .
-FILE = Dockerfile
-IMAGE = cytopia/phplint
+
+# -------------------------------------------------------------------------------------------------
+# Default configuration
+# -------------------------------------------------------------------------------------------------
+# Own vars
 TAG = latest
 
-build:
-	$(eval VERSION = $(shell if [ '$(TAG)' = "latest" ]; then echo '7-cli-alpine'; else echo '$(TAG)'; fi))
-	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE) -f $(DIR)/$(FILE) $(DIR)
+# Makefile.docker overwrites
+NAME       = phplint
+VERSION    = latest
+IMAGE      = cytopia/phplint
+FLAVOUR    = latest
+DIR        = Dockerfiles
 
-rebuild: pull
-	$(eval VERSION = $(shell if [ '$(TAG)' = "latest" ]; then echo '7-cli-alpine'; else echo '$(TAG)'; fi))
-	docker build --no-cache --build-arg VERSION=$(VERSION) -t $(IMAGE) -f $(DIR)/$(FILE) $(DIR)
+FILE = Dockerfile.$(FLAVOUR)-${VERSION}
 
-lint:
-	@docker run --rm -v $(CURRENT_DIR):/data cytopia/file-lint file-cr --text --ignore '.git/,.github/,tests/' --path .
-	@docker run --rm -v $(CURRENT_DIR):/data cytopia/file-lint file-crlf --text --ignore '.git/,.github/,tests/' --path .
-	@docker run --rm -v $(CURRENT_DIR):/data cytopia/file-lint file-trailing-single-newline --text --ignore '.git/,.github/,tests/' --path .
-	@docker run --rm -v $(CURRENT_DIR):/data cytopia/file-lint file-trailing-space --text --ignore '.git/,.github/,tests/' --path .
-	@docker run --rm -v $(CURRENT_DIR):/data cytopia/file-lint file-utf8 --text --ignore '.git/,.github/,tests/' --path .
-	@docker run --rm -v $(CURRENT_DIR):/data cytopia/file-lint file-utf8-bom --text --ignore '.git/,.github/,tests/' --path .
+# Building from master branch: Tag == 'latest'
+ifeq ($(strip $(TAG)),latest)
+	ifeq ($(strip $(VERSION)),latest)
+		DOCKER_TAG = $(FLAVOUR)
+	else
+		ifeq ($(strip $(FLAVOUR)),latest)
+			DOCKER_TAG = $(VERSION)
+		else
+			DOCKER_TAG = $(FLAVOUR)-$(VERSION)
+		endif
+	endif
+# Building from any other branch or tag: Tag == '<REF>'
+else
+	ifeq ($(strip $(VERSION)),latest)
+		DOCKER_TAG = $(FLAVOUR)-$(TAG)
+	else
+		ifeq ($(strip $(FLAVOUR)),latest)
+			DOCKER_TAG = $(VERSION)-$(TAG)
+		else
+			DOCKER_TAG = $(FLAVOUR)-$(VERSION)-$(TAG)
+		endif
+	endif
+endif
 
-test:
-	@$(MAKE) --no-print-directory _test-run-ok
-	@$(MAKE) --no-print-directory _test-run-fail
+# Makefile.lint overwrites
+FL_IGNORES  = .git/,.github/
+SC_IGNORES  = .git/,.github/
+JL_IGNORES  = .git/,.github/
 
+
+# -------------------------------------------------------------------------------------------------
+# Default Target
+# -------------------------------------------------------------------------------------------------
+.PHONY: help
+help:
+	@echo "lint                      Lint project files and repository"
+	@echo
+	@echo "build [ARCH=...] [TAG=...]               Build Docker image"
+	@echo "rebuild [ARCH=...] [TAG=...]             Build Docker image without cache"
+	@echo "push [ARCH=...] [TAG=...]                Push Docker image to Docker hub"
+	@echo
+	@echo "manifest-create [ARCHES=...] [TAG=...]   Create multi-arch manifest"
+	@echo "manifest-push [TAG=...]                  Push multi-arch manifest"
+	@echo
+	@echo "test [ARCH=...]                          Test built Docker image"
+	@echo
+
+
+# -------------------------------------------------------------------------------------------------
+#  Docker Targets
+# -------------------------------------------------------------------------------------------------
+.PHONY: build
+build: docker-arch-build
+
+.PHONY: rebuild
+rebuild: docker-arch-rebuild
+
+.PHONY: push
+push: docker-arch-push
+
+
+# -------------------------------------------------------------------------------------------------
+#  Manifest Targets
+# -------------------------------------------------------------------------------------------------
+.PHONY: manifest-create
+manifest-create: docker-manifest-create
+
+.PHONY: manifest-push
+manifest-push: docker-manifest-push
+
+
+# -------------------------------------------------------------------------------------------------
+# Test Targets
+# -------------------------------------------------------------------------------------------------
+.PHONY: test
+test: _test-version
+test: _test-run-ok
+test: _test-run-fail
+
+PHONY: _test-version
+_test-version:
+	@echo "------------------------------------------------------------"
+	@echo "- Testing correct PHP version"
+	@echo "------------------------------------------------------------"
+	@if [ "$(VERSION)" = "latest" ]; then \
+		if ! docker run --rm --platform $(ARCH) --entrypoint=php $(IMAGE):$(DOCKER_TAG) --version | grep -E '^PHP [.0-9]+'; then \
+			echo "Failed"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "Testing for tag: $(VERSION)"; \
+		if ! docker run --rm --platform $(ARCH) --entrypoint=php $(IMAGE):$(DOCKER_TAG) --version | grep -E "^PHP $(VERSION)"; then \
+			echo "Failed"; \
+			exit 1; \
+		fi; \
+	fi; \
+	echo "Success"
+
+.PHONY: _test-run-ok
 _test-run-ok:
 	@echo "------------------------------------------------------------"
 	@echo "- Testing correct files (1/2)"
 	@echo "------------------------------------------------------------"
-	@if ! docker run --rm -v $(CURRENT_DIR)/tests/ok:/data $(IMAGE); then \
+	@if ! docker run --rm --platform $(ARCH) -v $(CURRENT_DIR)/tests/ok:/data $(IMAGE):$(DOCKER_TAG); then \
 		echo "Failed"; \
 		exit 1; \
 	fi; \
@@ -43,17 +143,18 @@ _test-run-ok:
 	@echo "------------------------------------------------------------"
 	@echo "- Testing correct files (2/2)"
 	@echo "------------------------------------------------------------"
-	@if ! docker run --rm -v $(CURRENT_DIR)/tests:/data $(IMAGE) -i './fail/*' '*.php'; then \
+	@if ! docker run --rm --platform $(ARCH) -v $(CURRENT_DIR)/tests:/data $(IMAGE):$(DOCKER_TAG) -i './fail/*' '*.php'; then \
 		echo "Failed"; \
 		exit 1; \
 	fi; \
 	echo "Success";
 
+.PHONY: _test-run-fail
 _test-run-fail:
 	@echo "------------------------------------------------------------"
 	@echo "- Testing failures (1/2)"
 	@echo "------------------------------------------------------------"
-	@if docker run --rm -v $(CURRENT_DIR)/tests/fail:/data $(IMAGE); then \
+	@if docker run --rm --platform $(ARCH) -v $(CURRENT_DIR)/tests/fail:/data $(IMAGE):$(DOCKER_TAG); then \
 		echo "Failed"; \
 		exit 1; \
 	fi; \
@@ -61,28 +162,8 @@ _test-run-fail:
 	@echo "------------------------------------------------------------"
 	@echo "- Testing failures (2/2)"
 	@echo "------------------------------------------------------------"
-	@if docker run --rm -v $(CURRENT_DIR)/tests:/data $(IMAGE); then \
+	@if docker run --rm --platform $(ARCH) -v $(CURRENT_DIR)/tests:/data $(IMAGE):$(DOCKER_TAG); then \
 		echo "Failed"; \
 		exit 1; \
 	fi; \
 	echo "Success";
-
-tag:
-	docker tag $(IMAGE) $(IMAGE):$(TAG)
-
-pull:
-	$(eval VERSION = $(shell if [ '$(TAG)' = "latest" ]; then echo '7-cli-alpine'; else echo '$(TAG)'; fi))
-	grep -E '^\s*FROM' Dockerfile \
-		| sed -e 's/$${VERSION}/$(VERSION)/g' \
-		| sed -e 's/^FROM//g' -e 's/[[:space:]]*as[[:space:]]*.*$$//g' \
-		| xargs -n1 docker pull;
-
-login:
-	yes | docker login --username $(USER) --password $(PASS)
-
-push:
-	@$(MAKE) tag TAG=$(TAG)
-	docker push $(IMAGE):$(TAG)
-
-enter:
-	docker run --rm --name $(subst /,-,$(IMAGE)) -it --entrypoint=/bin/sh $(ARG) $(IMAGE):$(TAG)
